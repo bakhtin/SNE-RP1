@@ -1,10 +1,9 @@
 from inode import Inode, Tree
-import pickle
 
 if __name__ == "__main__":
 
     # Inode test
-    a = Inode(123, 555211, range(11200, 11210))
+    a = Inode(id=123, size=555211, blocks={1: range(11200, 11210), 2: range(11200, 11210), 3: range(11200, 11210)})
     b = Inode(124, 110001, range(11200, 11210))
     c = Inode(125, 4451, range(11200, 11210))
 
@@ -32,3 +31,13 @@ if __name__ == "__main__":
     f = open('tree')
     tree_str = f.read()
     print tree.unmarshal(tree_str)
+
+    sub = tree.inodes
+    path_components = tree._path_dissect('/home/3.jpg')
+    for i in path_components[:-1]:
+        sub = sub[i]
+    t = sub.pop(path_components[-1])
+
+
+
+    print t

@@ -24,6 +24,7 @@ class Inode(object):
         return str(self.id)
 
 
+
 class Tree(object):
     def __init__(self):
         self.inodes = {'/': {}}
@@ -39,14 +40,20 @@ class Tree(object):
         tree_printer(self.inodes)
         return ''
 
-    def _find_path(self, mapList, tree):
+    @staticmethod
+    def _find_path(mapList, tree):
         return reduce(operator.getitem, tree, mapList)
 
-    def mkdir(self, path):
+    @staticmethod
+    def _path_dissect(path):
         path_components = ['/']
         if not path.startswith('/'):
             raise LookupError("Path must start with /")
         path_components += path.strip('/').split('/')
+        return path_components
+
+    def mkdir(self, path):
+        path_components = self._path_dissect(path)
         try:
             self._find_path(self.inodes, path_components)
             raise DirectoryAlreadyExists(path)
@@ -55,10 +62,20 @@ class Tree(object):
         except KeyError:
             self._find_path(self.inodes, path_components[:-1])[path_components[-1]] = {}
 
+    def rmdir(self, path):
+        pass
+
     def marshal(self):
         return pickle.dumps(self, -1)
 
     @staticmethod
     def unmarshal(string):
         return pickle.loads(string)
+
+    def dir_or_inode(self, path):
+        try:
+            inode = self._find_path(self.inodes, self._path_dissect(path))
+        except KeyError or TypeError:
+            raise NoSuchPathExists(path)
+        return inode
 
