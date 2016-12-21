@@ -23,6 +23,12 @@ class Inode(object):
     def __str__(self):
         return str(self.id)
 
+    #TODO: think about block update and creation of single/double/triple(opt.) indirect
+    def block_update_job(self, array):
+
+    def single_indirect(self, array):
+
+    def double_indirect(self, array):
 
 
 class Tree(object):
