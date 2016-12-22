@@ -2,6 +2,7 @@ import os, sys
 from errno import *
 import stat
 import fcntl
+
 try:
     import _find_fuse_parts
 except ImportError:
@@ -20,7 +21,9 @@ fuse.fuse_python_api = (0, 2)
 
 fuse.feature_assert('stateful_files', 'has_init')
 
-BLOCK_SIZE = 1024*1024 # 1M
+BLOCK_SIZE = 1024 * 1024  # 1M
+CACHE_DIR = '/var/cache/snfs/.cache'
+
 
 def flag2mode(flags):
     md = {os.O_RDONLY: 'r', os.O_WRONLY: 'w', os.O_RDWR: 'w+'}
@@ -31,8 +34,10 @@ def flag2mode(flags):
 
     return m
 
+
 # stub
 TREE = Tree()
+
 
 class Stat(fuse.Stat):
     def __init__(self, inode=None):
@@ -59,14 +64,14 @@ class Stat(fuse.Stat):
             self.st_mtime = self.st_atime
             self.st_ctime = self.st_atime
 
-class SNfs(Fuse):
 
+class SNfs(Fuse):
     def __init__(self, *args, **kw):
 
         Fuse.__init__(self, *args, **kw)
 
         self.root = '/'
-        os.mkdir('.cache')
+        os.mkdir(CACHE_DIR)
         # TODO: download tree from SN and save to .cache directory. Stub for now
         self.tree = TREE
 
@@ -93,7 +98,7 @@ class SNfs(Fuse):
     def unlink(self, path):
         pass
 
-    # TODO: clear cache
+    # TODO: clear cache if necessary
     def rmdir(self, path):
         path_components = Tree._path_dissect(path)
         sub = self.tree.inodes
@@ -131,7 +136,7 @@ class SNfs(Fuse):
         if isinstance(t, Inode):
             if 0 < len <= t.size:
                 # Assuming that tree branch mirrors in .cache dir
-                f = open("./.cache" + path, "a")
+                f = open(CACHE_DIR + path, "a")
                 f.truncate(len)
                 f.close()
                 # clear respective blocks in Inode
@@ -148,38 +153,45 @@ class SNfs(Fuse):
         self.inodes.mkdir(path)
 
     def utime(self, path, times):
+        d_or_f = self.tree.dir_or_inode(path)
+        #if isinstance(d_or_f, Inode):
+        #    d_or_f.
         os.utime("." + path, times)
 
-#    The following utimens method would do the same as the above utime method.
-#    We can't make it better though as the Python stdlib doesn't know of
-#    subsecond preciseness in acces/modify times.
-#  
-#    def utimens(self, path, ts_acc, ts_mod):
-#      os.utime("." + path, (ts_acc.tv_sec, ts_mod.tv_sec))
+    #    The following utimens method would do the same as the above utime method.
+    #    We can't make it better though as the Python stdlib doesn't know of
+    #    subsecond preciseness in acces/modify times.
+    #
+    #    def utimens(self, path, ts_acc, ts_mod):
+    #      os.utime("." + path, (ts_acc.tv_sec, ts_mod.tv_sec))
 
     def access(self, path, mode):
-        if not os.access("." + path, mode):
+        path_components = Tree._path_dissect(path)
+        try:
+            Tree._find_path(self.tree.inodes, path_components)
+        except TypeError or KeyError:
             return -EACCES
 
-#    This is how we could add stub extended attribute handlers...
-#    (We can't have ones which aptly delegate requests to the underlying fs
-#    because Python lacks a standard xattr interface.)
-#
-#    def getxattr(self, path, name, size):
-#        val = name.swapcase() + '@' + path
-#        if size == 0:
-#            # We are asked for size of the value.
-#            return len(val)
-#        return val
-#
-#    def listxattr(self, path, size):
-#        # We use the "user" namespace to please XFS utils
-#        aa = ["user." + a for a in ("foo", "bar")]
-#        if size == 0:
-#            # We are asked for size of the attr list, ie. joint size of attrs
-#            # plus null separators.
-#            return len("".join(aa)) + len(aa)
-#        return aa
+
+        #    This is how we could add stub extended attribute handlers...
+        #    (We can't have ones which aptly delegate requests to the underlying fs
+        #    because Python lacks a standard xattr interface.)
+        #
+        #    def getxattr(self, path, name, size):
+        #        val = name.swapcase() + '@' + path
+        #        if size == 0:
+        #            # We are asked for size of the value.
+        #            return len(val)
+        #        return val
+        #
+        #    def listxattr(self, path, size):
+        #        # We use the "user" namespace to please XFS utils
+        #        aa = ["user." + a for a in ("foo", "bar")]
+        #        if size == 0:
+        #            # We are asked for size of the attr list, ie. joint size of attrs
+        #            # plus null separators.
+        #            return len("".join(aa)) + len(aa)
+        #        return aa
 
     def statfs(self):
         """
@@ -212,15 +224,14 @@ class SNfs(Fuse):
     class SNFile(object):
 
         def __init__(self, path, flags, *mode):
-            #self.file = os.fdopen(os.open("." + path, flags, *mode),
+            # self.file = os.fdopen(os.open("." + path, flags, *mode),
             #                      flag2mode(flags))
-            #self.fd = self.file.fileno()
+            # self.fd = self.file.fileno()
 
             # call to API to download all the associated file blocks
             s = '\x0a\x0b\x0c\x0d'
             # write to cache dir
             f = open('.cache')
-
 
         def read(self, length, offset):
             self.file.seek(offset)
@@ -281,9 +292,9 @@ class SNfs(Fuse):
 
             # Convert fcntl-ish lock parameters to Python's weird
             # lockf(3)/flock(2) medley locking API...
-            op = { fcntl.F_UNLCK : fcntl.LOCK_UN,
-                   fcntl.F_RDLCK : fcntl.LOCK_SH,
-                   fcntl.F_WRLCK : fcntl.LOCK_EX }[kw['l_type']]
+            op = {fcntl.F_UNLCK: fcntl.LOCK_UN,
+                  fcntl.F_RDLCK: fcntl.LOCK_SH,
+                  fcntl.F_WRLCK: fcntl.LOCK_EX}[kw['l_type']]
             if cmd == fcntl.F_GETLK:
                 return -EOPNOTSUPP
             elif cmd == fcntl.F_SETLK:
@@ -296,7 +307,6 @@ class SNfs(Fuse):
 
             fcntl.lockf(self.fd, op, kw['l_start'], kw['l_len'])
 
-
     def main(self, *a, **kw):
 
         self.file_class = self.SNFile
@@ -305,7 +315,6 @@ class SNfs(Fuse):
 
 
 def main():
-
     usage = """
 Userspace nullfs-alike: mirror the filesystem tree from some point on.
 
