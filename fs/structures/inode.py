@@ -13,23 +13,18 @@ class Inode(object):
         'SoundCloud': 3
     }
 
-    def __init__(self, id, size, blocks, creation_date=datetime.datetime.now(), last_modified=datetime.datetime.now()):
+    def __init__(self, id, size, blocks, m_time=datetime.datetime.now(), c_time=datetime.datetime.now(),
+                 a_time=datetime.datetime.now()):
         self.id = id
         self.size = size
         self.blocks = blocks
-        self.creation_date = creation_date
-        self.last_modified = last_modified
+        self.a_time = a_time
+        self.m_time = m_time
+        self.c_time = c_time
+
 
     def __str__(self):
         return str(self.id)
-
-    #TODO: think about block update and creation of single/double/triple(opt.) indirect
-    def block_update_job(self, array):
-
-    def single_indirect(self, array):
-
-    def double_indirect(self, array):
-
 
 class Tree(object):
     def __init__(self):
