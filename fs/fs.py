@@ -208,42 +208,53 @@ class SNfs(Fuse):
         pass
 
     class SNFile(object):
-        def __init__(self, path, flags, *mode):
+        def rename(self, path, path1):
+        path_components = Tree._path_dissect(path)
+        new_name = path1.strip('/').split('/')[-1]
+        sub = self.tree.inodes
+        for i in path_components[:-1]:
+            sub = sub[i]
+        old = sub.pop(path_components[-1])
+        self._find_path(self.inodes, path_components[:-1])[new_name] = old
+
+        def __init__(self, snfs, path, flags, *mode):
             """
                 initialize file for a folder
                 if no file with such name exists, then we have to create one.
 
                 all files are stored in cache (/var/cache/snfs/...)
-                after fsdestroy all cache should be removed
+                after fsdestroy all cache should be removed (task pending)
             """
             #TODO: updating folder with a new filename if creating a new one
-            inode = SNfs.tree.dir_or_inode(path)
+            inode = snfs.tree.dir_or_inode(path)
             if isinstance(inode, Inode):
-                self.isnewfile = False
-                ## API function MUST be implemented. Download file to the entered path.
-                ## Then open it as a simple file
+                self.isnewfile = False                  ## API function MUST be implemented. Download file to the entered path.
+                                                        ## Then open it as a simple file
                 download_from_vk(SNfs.tree.dir_or_inode(path).blocks,
-                                 CACHE_DIR + path)
-            else:
+                                 CACHE_DIR + path, inode.size)
+            
+            else: # create new inode in directory
                 self.isnewfile = True
+                path_comp = Tree._path_dissect(path)
+                snfs._find_path(snfs.inodes, path_comp[:-1])[path_comp(path)[-1]] = Inode(0, 0, range(1,2))
 
             self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
                                   flag2mode(flags))
             self.fd = self.file.fileno()
-
 
         def read(self, length, offset):
             self.file.seek(offset)
             return self.file.read(length)
 
         def write(self, buf, offset):
-            #self.file.seek(offset)
-            #self.file.write(buf)
+            self.file.seek(offset)
+            self.file.write(buf)
             if self.isnewfile:
-                upload_to_vk(splitFile(self.file, BLOCK_SIZE), path)
                 # TODO: create links to blocks
+                block_list = splitFile(self.file, BLOCK_SIZE)        # get list of blocks
             else:
                 # TODO: update/create links to blocks
+
             return len(buf)
 
         def release(self, flags):
@@ -314,7 +325,7 @@ class SNfs(Fuse):
 
     def main(self, *a, **kw):
 
-        self.file_class = self.SNFile
+        self.file_class = self.SNFile(self, path, flags, *mode)
 
         return Fuse.main(self, *a, **kw)
 
