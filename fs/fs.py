@@ -2,6 +2,7 @@ import os, sys
 from errno import *
 import stat
 import fcntl
+
 try:
     import _find_fuse_parts
 except ImportError:
@@ -21,7 +22,9 @@ fuse.fuse_python_api = (0, 2)
 
 fuse.feature_assert('stateful_files', 'has_init')
 
-BLOCK_SIZE = 1024*1024 # 1M
+BLOCK_SIZE = 1024 * 1024  # 1M
+CACHE_DIR = '/var/cache/snfs/.cache'
+
 
 def flag2mode(flags):
     md = {os.O_RDONLY: 'r', os.O_WRONLY: 'w', os.O_RDWR: 'w+'}
@@ -62,18 +65,16 @@ class Stat(fuse.Stat):
 
 class SNfs(Fuse):
 
-    self.cache_dir = '/var/cache/snfs'
-
     def __init__(self, *args, **kw):
 
         Fuse.__init__(self, *args, **kw)
 
         self.root = '/'
         #os.mkdir('.cache')
-        try:         
-            os.mkdir(self.cache_dir)    # create cache dir
+        try:
+            os.mkdir(CACHE_DIR)    # create cache dir
         except OSError                  # path already exists
-            pass            
+            pass
 
         # TODO: download tree from SN and save to .cache directory. Stub for now
         self.tree = TREE
@@ -101,7 +102,7 @@ class SNfs(Fuse):
     def unlink(self, path):
         pass
 
-    # TODO: clear cache
+    # TODO: clear cache if necessary
     def rmdir(self, path):
         path_components = Tree._path_dissect(path)
         sub = self.tree.inodes
@@ -139,7 +140,7 @@ class SNfs(Fuse):
         if isinstance(t, Inode):
             if 0 < len <= t.size:
                 # Assuming that tree branch mirrors in .cache dir
-                f = open("./.cache" + path, "a")
+                f = open(CACHE_DIR + path, "a")
                 f.truncate(len)
                 f.close()
                 # clear respective blocks in Inode
@@ -156,6 +157,9 @@ class SNfs(Fuse):
         self.inodes.mkdir(path)
 
     def utime(self, path, times):
+        d_or_f = self.tree.dir_or_inode(path)
+        #if isinstance(d_or_f, Inode):
+        #    d_or_f.
         os.utime("." + path, times)
 
 #    The following utimens method would do the same as the above utime method.
@@ -166,7 +170,10 @@ class SNfs(Fuse):
 #      os.utime("." + path, (ts_acc.tv_sec, ts_mod.tv_sec))
 
     def access(self, path, mode):
-        if not os.access("." + path, mode):
+        path_components = Tree._path_dissect(path)
+        try:
+            Tree._find_path(self.tree.inodes, path_components)
+        except TypeError or KeyError:
             return -EACCES
 
 #    This is how we could add stub extended attribute handlers...
@@ -221,7 +228,7 @@ class SNfs(Fuse):
 
 
         def __init__(self, snfs, path, flags, *mode):
-            """ 
+            """
                 initialize file for a folder
                 if no file with such name exists, then we have to create one.
 
@@ -238,12 +245,12 @@ class SNfs(Fuse):
                 # create new inode to the tree
                 self.isnewfile = True
             else:
-                ## API function MUST be implemented. Download file to the entered path. 
+                ## API function MUST be implemented. Download file to the entered path.
                 ## Then open it as a simple file
                 self.isnewfile = False
-                download_from_vk(snfs.tree.dir_or_inode(path).blocks, 
+                download_from_vk(snfs.tree.dir_or_inode(path).blocks,
                                  snfs.cache_dir + path )
-            
+
 
             self.file = os.fdopen(os.open(snfs.cache_dir + path, flags, *mode),
                                   flag2mode(flags))
@@ -332,7 +339,7 @@ class SNfs(Fuse):
 
     def main(self, *a, **kw):
 
-        self.file_class = self.SNFile(self, path, flags, *mode)
+        self.file_class = self.SNFile
 
         return Fuse.main(self, *a, **kw)
 
