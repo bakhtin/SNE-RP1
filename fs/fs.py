@@ -3,6 +3,7 @@ import os
 import stat
 import sys
 from errno import *
+import config
 
 try:
     import _find_fuse_parts
@@ -13,18 +14,14 @@ from fuse import Fuse
 from structures.inode import Inode, Tree
 from api.functions import splitFile, upload_to_vk
 import time
-from fs.structures.exceptions import *
+from structures.exceptions import *
 
 if not hasattr(fuse, '__version__'):
     raise RuntimeError, \
         "your fuse-py doesn't know of fuse.__version__, probably it's too old."
 
 fuse.fuse_python_api = (0, 2)
-
 fuse.feature_assert('stateful_files', 'has_init')
-
-BLOCK_SIZE = 1024 * 1024  # 1M
-CACHE_DIR = '/var/cache/snfs/.cache'
 
 
 def flag2mode(flags):
@@ -71,11 +68,11 @@ class SNfs(Fuse):
         Fuse.__init__(self, *args, **kw)
         self.root = '/'
         try:
-            os.mkdir(CACHE_DIR)    # create cache dir
+            os.mkdir(config.CACHE_DIR)    # create cache dir
         except OSError:                  # path already exists
             pass
 
-        # TODO: download tree from SN and save to .cache directory. Stub for now
+        # TODO: download tree from SN and save to cache directory. Stub for now
         self.tree = TREE
 
     def getattr(self, path):
@@ -138,14 +135,14 @@ class SNfs(Fuse):
             raise NoSuchPathExists(path)
         if isinstance(t, Inode):
             if 0 < len <= t.size:
-                # Assuming that tree branch mirrors in .cache dir
-                f = open(CACHE_DIR + path, "a")
+                # Assuming that tree branch mirrors in cache dir
+                f = open(config.CACHE_DIR + path, "a")
                 f.truncate(len)
                 f.close()
                 # clear respective blocks in Inode
                 t.size = len
-                blocks = t.size / BLOCK_SIZE
-                if t.size % BLOCK_SIZE != 0:
+                blocks = t.size / config.BLOCK_SIZE
+                if t.size % config.BLOCK_SIZE != 0:
                     blocks += 1
                 t.blocks = t.blocks[:blocks]
 
@@ -191,7 +188,7 @@ class SNfs(Fuse):
 
         class SNStatVFS(fuse.StatVfs):
             def __init__(self):
-                self.f_bsize = BLOCK_SIZE
+                self.f_bsize = config.BLOCK_SIZE
                 self.f_frsize = self.f_bsize
                 self.f_blocks = sys.maxint
                 # TODO: would be nice if we can display API requests limit left as f_bfree
@@ -224,11 +221,11 @@ class SNfs(Fuse):
                 ## API function MUST be implemented. Download file to the entered path.
                 ## Then open it as a simple file
                 download_from_vk(SNfs.tree.dir_or_inode(path).blocks,
-                                 CACHE_DIR + path)
+                                 config.CACHE_DIR + path)
             else:
                 self.isnewfile = True
 
-            self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
+            self.file = os.fdopen(os.open(config.CACHE_DIR + path, flags, *mode),
                                   flag2mode(flags))
             self.fd = self.file.fileno()
 
@@ -241,7 +238,7 @@ class SNfs(Fuse):
             #self.file.seek(offset)
             #self.file.write(buf)
             if self.isnewfile:
-                upload_to_vk(splitFile(self.file, BLOCK_SIZE), path)
+                upload_to_vk(splitFile(self.file, config.BLOCK_SIZE), path)
                 # TODO: create links to blocks
             else:
                 # TODO: update/create links to blocks

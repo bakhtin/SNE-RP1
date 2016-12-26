@@ -3,7 +3,6 @@ import operator
 import pickle
 import uuid
 from functools import reduce
-
 from exceptions import *
 
 
