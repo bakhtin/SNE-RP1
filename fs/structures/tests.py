@@ -1,4 +1,5 @@
 from inode import Inode, Tree
+from api.functions import splitFile, upload_to_vk, download_from_vk, upload_main_inode
 
 if __name__ == "__main__":
 
@@ -28,16 +29,11 @@ if __name__ == "__main__":
     f.close()
 
     # deserialization
-    f = open('tree')
-    tree_str = f.read()
+    # f = open('tree')
+    # tree_str = f.read()
+    # print tree.unmarshal(tree_str)
+
+    upload_main_inode()
+    tree_str = download_from_vk(tree=True)
+
     print tree.unmarshal(tree_str)
-
-    sub = tree.inodes
-    path_components = tree._path_dissect('/home/3.jpg')
-    for i in path_components[:-1]:
-        sub = sub[i]
-    t = sub.pop(path_components[-1])
-
-
-
-    print t

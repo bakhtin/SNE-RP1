@@ -12,7 +12,7 @@ except ImportError:
 import fuse
 from fuse import Fuse
 from structures.inode import Inode, Tree
-from api.functions import splitFile, upload_to_vk
+from api.functions import splitFile, upload_to_vk, download_from_vk, get_id_of_main_inode
 import time
 from structures.exceptions import *
 
@@ -72,8 +72,7 @@ class SNfs(Fuse):
         except OSError:                  # path already exists
             pass
 
-        # TODO: download tree from SN and save to cache directory. Stub for now
-        self.tree = TREE
+        self.tree = download_from_vk(tree=True)
 
     def getattr(self, path):
         d_or_f = self.tree.dir_or_inode(path)
