@@ -85,20 +85,20 @@ def upload_to_vk(array):
 	return final_array	
 		
 
-def download_from_vk(inode):
+def download_from_vk(tree=False, *args, **kwargs):
 	#array = ['396547478_456239081', '396547478_456239082', '396547478_456239083', '396547478_456239084', '396547478_456239085', '396547478_456239086', '396547478_456239087', '396547478_456239088', '396547478_456239089', '396547478_456239090', '396547478_456239091']
-	outputfile = "001.mp4"
-	blocks = inode.blocks
-	size = inode.size
-	array = []
+	if tree==False:
+		array = kwargs['blocks']
+		size = kwargs['size']
+		fullpath = kwargs['fullpath']
+		outputfile = fullpath.split("/")[-1:][0]
+
 	filenames = []
-	for key, value in blocks.iteritems():
-		array.append(value)
-	
-	if outputfile == "tree":
-		array = get_id_of_main_inode()
-		array = array.split("_")
-		array = [str(array[0]) + "_" + str(array[1])]
+	if tree==True:
+		array = get_id_of_main_inode(hash=True)
+		outputfile="tree"
+		#array = array[0].split("_")
+		#array = [str(array[0]) + "_" + str(array[1])]
 		
 	print array
 	string = ''
@@ -127,7 +127,7 @@ def download_from_vk(inode):
 			print j
 	f = open(outputfile, 'wb')
 	
-	if outputfile == "tree":
+	if tree==True:
 		size = unpack(">i", output[:4])[0]
 		print size
 		f.write(output[4:4+size])
@@ -138,7 +138,7 @@ def download_from_vk(inode):
 		os.remove(i)
 	#print len(output)
 
-def get_id_of_main_inode ():
+def get_id_of_main_inode (hash = False):
 	album_id = 81678642
 	headers = {
 		'origin': 'https://vk.com',
@@ -163,63 +163,76 @@ def get_id_of_main_inode ():
 
 	r = requests.post('https://vk.com/al_audio.php', headers=headers, data=data)
 	response = re.search('\[\[.+\]\]', r.text)
-	response = json.loads(response.group(0))
-	return str(response[0][1]) + "_" + str(response[0][0]+"_"+str(response[0][13].split("/")[1]))
+	response = reversed(json.loads(response.group(0)))
+	
+	answer = []
+	if hash == True:
+		for i in response:
+			answer.append(str(i[1]) + "_" + str(i[0]+"_"+str(i[13].split("/")[1])))
+	else:
+		for i in response:
+			answer.append(str(i[1]) + "_" + str(i[0]))
+	return answer
 	
 def upload_main_inode ():
-	audio = get_id_of_main_inode ().split("_")
+	audio = get_id_of_main_inode (hash = True)
 	
+	print audio
 	album_id = 81678642
 	
-	ids = upload_to_vk(splitFile("tree", 956))
+	ids = upload_to_vk(splitFile("tree"))
+	print ids
+	for i in audio:
+		i = i.split("_")
+		headers = {
+			'origin': 'https://vk.com',
+			'accept-encoding': 'gzip, deflate, br',
+			'x-requested-with': 'XMLHttpRequest',
+			'accept-language': 'ru-RU,ru;q=0.8,en-US;q=0.6,en;q=0.4',
+			'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.100 Safari/537.36',
+			'content-type': 'application/x-www-form-urlencoded',
+			'accept': '*/*',
+			'referer': 'https://vk.com/audios396547478?album_id=81678642',
+			'authority': 'vk.com',
+			'cookie': 'remixlang=0; remixdt=0; remixtst=e68e8382; remixsid=1a31753fc52162115c7376bcb5b882ed74dd5506f570b911c3795; remixsslsid=1; remixseenads=2; remixcurr_audio=396547478_456239094; remixflash=23.0.0; remixscreen_depth=24',
+		}
 
+		data = {
+		  'act': 'delete_audio',
+		  'aid': i[1],
+		  'al': '1',
+		  'hash': i[2],
+		  'oid': i[0],
+		  'restore': '0'
+		}
+		print data
+		r = requests.post('https://vk.com/al_audio.php', headers=headers, data=data)
+		
 
-
-	headers = {
-		'origin': 'https://vk.com',
-		'accept-encoding': 'gzip, deflate, br',
-		'x-requested-with': 'XMLHttpRequest',
-		'accept-language': 'ru-RU,ru;q=0.8,en-US;q=0.6,en;q=0.4',
-		'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.100 Safari/537.36',
-		'content-type': 'application/x-www-form-urlencoded',
-		'accept': '*/*',
-		'referer': 'https://vk.com/audios396547478?album_id=81678642',
-		'authority': 'vk.com',
-		'cookie': 'remixlang=0; remixdt=0; remixtst=e68e8382; remixsid=1a31753fc52162115c7376bcb5b882ed74dd5506f570b911c3795; remixsslsid=1; remixseenads=2; remixcurr_audio=396547478_456239094; remixflash=23.0.0; remixscreen_depth=24',
-	}
-
-	data = {
-	  'act': 'delete_audio',
-	  'aid': audio[1],
-	  'al': '1',
-	  'hash': audio[2],
-	  'oid': audio[0],
-	  'restore': '0'
-	}
-	print data
-	r = requests.post('https://vk.com/al_audio.php', headers=headers, data=data)
-	
 	print r.text
 	
-	headers = {
-		'origin': 'https://vk.com',
-		'accept-encoding': 'gzip, deflate, br',
-		'x-requested-with': 'XMLHttpRequest',
-		'accept-language': 'ru-RU,ru;q=0.8,en-US;q=0.6,en;q=0.4',
-		'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.100 Safari/537.36',
-		'content-type': 'application/x-www-form-urlencoded',
-		'accept': '*/*',
-		'referer': 'https://vk.com/audios396547478',
-		'authority': 'vk.com',
-		'cookie': 'remixlang=0; remixdt=0; remixtst=e68e8382; remixsid=1a31753fc52162115c7376bcb5b882ed74dd5506f570b911c3795; remixsslsid=1; remixseenads=2; remixcurr_audio=396547478_456239096; remixflash=23.0.0; remixscreen_depth=24',
-	}
+	for i in ids:
+		headers = {
+			'origin': 'https://vk.com',
+			'accept-encoding': 'gzip, deflate, br',
+			'x-requested-with': 'XMLHttpRequest',
+			'accept-language': 'ru-RU,ru;q=0.8,en-US;q=0.6,en;q=0.4',
+			'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.100 Safari/537.36',
+			'content-type': 'application/x-www-form-urlencoded',
+			'accept': '*/*',
+			'referer': 'https://vk.com/audios396547478',
+			'authority': 'vk.com',
+			'cookie': 'remixlang=0; remixdt=0; remixtst=e68e8382; remixsid=1a31753fc52162115c7376bcb5b882ed74dd5506f570b911c3795; remixsslsid=1; remixseenads=2; remixcurr_audio=396547478_456239096; remixflash=23.0.0; remixscreen_depth=24',
+		}
 
-	data = {
-		'act': 'a_move_to_album',
-		'al': '1',
-		'album_id': '81678642',
-		'audio_id': ids[0].split("_")[1],
-		'hash': '7575e1db51579d5ddc'
-	}
-	print data
-	requests.post('https://vk.com/al_audio.php', headers=headers, data=data)
+		data = {
+			'act': 'a_move_to_album',
+			'al': '1',
+			'album_id': '81678642',
+			'audio_id': i.split("_")[1],
+			'hash': '7575e1db51579d5ddc'
+		}
+		print data
+		requests.post('https://vk.com/al_audio.php', headers=headers, data=data)
+
+
