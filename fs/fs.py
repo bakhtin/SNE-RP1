@@ -208,14 +208,6 @@ class SNfs(Fuse):
         pass
 
     class SNFile(object):
-        def rename(self, path, path1):
-        path_components = Tree._path_dissect(path)
-        new_name = path1.strip('/').split('/')[-1]
-        sub = self.tree.inodes
-        for i in path_components[:-1]:
-            sub = sub[i]
-        old = sub.pop(path_components[-1])
-        self._find_path(self.inodes, path_components[:-1])[new_name] = old
 
         def __init__(self, snfs, path, flags, *mode):
             """
@@ -225,23 +217,33 @@ class SNfs(Fuse):
                 all files are stored in cache (/var/cache/snfs/...)
                 after fsdestroy all cache should be removed (task pending)
             """
-            #TODO: updating folder with a new filename if creating a new one
-            inode = snfs.tree.dir_or_inode(path)
-            if isinstance(inode, Inode):
-                self.isnewfile = False                  ## API function MUST be implemented. Download file to the entered path.
-                                                        ## Then open it as a simple file
-                download_from_vk(SNfs.tree.dir_or_inode(path).blocks,
-                                 CACHE_DIR + path, inode.size)
             
-            else: # create new inode in directory
-                self.isnewfile = True
-                path_comp = Tree._path_dissect(path)
-                snfs._find_path(snfs.inodes, path_comp[:-1])[path_comp(path)[-1]] = Inode(0, 0, range(1,2))
+            self.mode = mode        # remember the state 
 
+            for i in mode:
+                if i == os.O_CREAT:     # create file immediately
+                    self.isnewfile = True
+                    self.finode = Inode(0, 0, range(1,2))       # what about new Inode id? 
+                    path_comp = Tree._path_dissect(path)
+                    snfs._find_path(snfs.inodes, path_comp[:-1])[path_comp(path)[-1]] = self.finode #create inode for the file
+                    self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
+                                  flag2mode(flags))
+                    self.fd = self.file.fileno()
+                    return
+                # other states do not mind right now
+                # do not removed in case of wrong solution
+            
+            self.isnewfile = False
+            self.finode = snfs.tree.dir_or_inode(path)
             self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
                                   flag2mode(flags))
             self.fd = self.file.fileno()
+            
+            download_from_vk(snfs.tree.dir_or_inode(path).blocks,
+                                 CACHE_DIR + path, inode.size)
+            return
 
+        # in read() nothing to change as we've downloaded this file to the cache
         def read(self, length, offset):
             self.file.seek(offset)
             return self.file.read(length)
@@ -249,12 +251,23 @@ class SNfs(Fuse):
         def write(self, buf, offset):
             self.file.seek(offset)
             self.file.write(buf)
-            if self.isnewfile:
-                # TODO: create links to blocks
-                block_list = splitFile(self.file, BLOCK_SIZE)        # get list of blocks
+            
+            if self.isnewfile:      # in case of new file we have to write all blocks 
+                self.update_pending = splitFile(self.file, BLOCK_SIZE)        # get list of blocks for uploading
             else:
                 # TODO: update/create links to blocks
+                self.data_only = 1043952    # bytes in 1 block of data
+                blockid = offset / self.data_only
+                block_list = splitFile(self.file, BLOCK_SIZE)        # get list of blocks
 
+                for i in self.mode:
+                    if i == os.O_APPEND:                # if append - then we add to the end and split again
+                        self.update_pending = block_list[blockid::]   
+                        return len(buf)
+                if self.finode.size < os.path.getsize(CACHE_DIR + path):        # if file size has been changed, than we have to rewrite all blocks starting from one that has changed
+                    self.update_pending = block_list[blockid:(offset+len(buf))/self.data_only]    
+                else:
+                    self.update_pending = block_list[blockid::]     # update all blocks
             return len(buf)
 
         def release(self, flags):
@@ -357,3 +370,17 @@ Userspace nullfs-alike: mirror the filesystem tree from some point on.
 
 if __name__ == '__main__':
     main()
+
+
+# comments (in case smth bad happens)
+# in def __init__ (class SNfile)
+            #inode = snfs.tree.dir_or_inode(path)
+            #if isinstance(inode, Inode):
+            #    self.isnewfile = False                  ## API function MUST be implemented. Download file to the entered path.
+                                                        ## Then open it as a simple file
+            #    download_from_vk(SNfs.tree.dir_or_inode(path).blocks,
+            #                     CACHE_DIR + path, inode.size)
+            
+            #else: # create new inode in directory
+            #    self.isnewfile = True
+
