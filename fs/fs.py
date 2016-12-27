@@ -10,7 +10,7 @@ except ImportError:
 import fuse
 from fuse import Fuse
 from structures.inode import Inode, Tree
-from api.functions import splitFile, upload_to_vk
+from api.functions import splitFile, upload_to_vk, download_from_vk
 import time
 from utils.exceptions import *
 
@@ -253,21 +253,31 @@ class SNfs(Fuse):
             self.file.write(buf)
             
             if self.isnewfile:      # in case of new file we have to write all blocks 
-                self.update_pending = splitFile(self.file, BLOCK_SIZE)        # get list of blocks for uploading
+                self.finode.size = os.path.getsize(CACHE_DIR + path)
+                self.update_pending = splitFile(self.file)        # get list of blocks for uploading
             else:
                 # TODO: update/create links to blocks
                 self.data_only = 1043952    # bytes in 1 block of data
                 blockid = offset / self.data_only
-                block_list = splitFile(self.file, BLOCK_SIZE)        # get list of blocks
+                block_list = splitFile(self.file)       # get list of blocks
+                
+                for i in range(1,blockid-1)                         # fill with none list of mischanged blocks 
+                            self.update_pending.append(None)
 
                 for i in self.mode:
                     if i == os.O_APPEND:                # if append - then we add to the end and split again
-                        self.update_pending = block_list[blockid::]   
+                        self.update_pending.extend(block_list[blockid::])   
                         return len(buf)
-                if self.finode.size < os.path.getsize(CACHE_DIR + path):        # if file size has been changed, than we have to rewrite all blocks starting from one that has changed
-                    self.update_pending = block_list[blockid:(offset+len(buf))/self.data_only]    
+                if self.finode.size < os.path.getsize(CACHE_DIR + path):    # if file size has been changed, than we have to rewrite all blocks starting from one that has changed
+                    self.finode.size = os.path.getsize(CACHE_DIR + path)    # update size in the inode
+                    self.update_pending.extend(block_list[blockid::])       # update all blocks
                 else:
-                    self.update_pending = block_list[blockid::]     # update all blocks
+                    endblockid = (offset+len(buf))/self.data_only
+                    self.update_pending.extend(block_list[blockid:endblockid])  # update changed data
+                    
+                    for i in range(endblockid, len(block_list)):        # reach to the amount of blocks
+                        self.update_pending.append(None)
+
             return len(buf)
 
         def release(self, flags):
@@ -294,6 +304,9 @@ class SNfs(Fuse):
 
         def ftruncate(self, len):
             self.file.truncate(len)
+            self.finode.size = os.path.getsize(CACHE_DIR + path)    #update size in the inode
+            block_list = splitFile(self.file)        # get list of blocks
+            self.update_pending
 
         def lock(self, cmd, owner, **kw):
             # The code here is much rather just a demonstration of the locking
