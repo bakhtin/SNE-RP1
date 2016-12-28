@@ -1,9 +1,7 @@
-import fcntl
-import os
-import stat
-import sys
+import os, sys
 from errno import *
-import config
+import stat
+import fcntl
 
 try:
     import _find_fuse_parts
@@ -12,16 +10,20 @@ except ImportError:
 import fuse
 from fuse import Fuse
 from structures.inode import Inode, Tree
-from api.functions import splitFile, upload_to_vk, download_from_vk, get_id_of_main_inode
+from api.functions import splitFile, upload_to_vk, download_from_vk
 import time
-from structures.exceptions import *
+from utils.exceptions import *
 
 if not hasattr(fuse, '__version__'):
     raise RuntimeError, \
         "your fuse-py doesn't know of fuse.__version__, probably it's too old."
 
 fuse.fuse_python_api = (0, 2)
+
 fuse.feature_assert('stateful_files', 'has_init')
+
+BLOCK_SIZE = 1024 * 1024  # 1M
+CACHE_DIR = '/var/cache/snfs/.cache'
 
 
 def flag2mode(flags):
@@ -68,11 +70,12 @@ class SNfs(Fuse):
         Fuse.__init__(self, *args, **kw)
         self.root = '/'
         try:
-            os.mkdir(config.CACHE_DIR)    # create cache dir
+            os.mkdir(CACHE_DIR)    # create cache dir
         except OSError:                  # path already exists
             pass
 
-        self.tree = download_from_vk(tree=True)
+        # TODO: download tree from SN and save to .cache directory. Stub for now
+        self.tree = TREE
 
     def getattr(self, path):
         d_or_f = self.tree.dir_or_inode(path)
@@ -214,30 +217,29 @@ class SNfs(Fuse):
                 all files are stored in cache (/var/cache/snfs/...)
                 after fsdestroy all cache should be removed (task pending)
             """
-
-            self.mode = mode        # remember the state
-
+            
+            self.mode = mode        # remember the state 
+            self.log_changes = []
             for i in mode:
                 if i == os.O_CREAT:     # create file immediately
-                    self.isnewfile = True
-                    self.finode = Inode(0, 0, range(1,2))       # what about new Inode id?
+                    #self.isnewfile = True
+                    finode = Inode(0, range(1,2))       # 0-size and small range
                     path_comp = Tree._path_dissect(path)
-                    snfs._find_path(snfs.inodes, path_comp[:-1])[path_comp(path)[-1]] = self.finode #create inode for the file
+                    snfs._find_path(snfs.inodes, path_comp[:-1])[path_comp(path)[-1]] = finode #create inode for the file
                     self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
                                   flag2mode(flags))
                     self.fd = self.file.fileno()
                     return
                 # other states do not mind right now
                 # do not removed in case of wrong solution
-
-            self.isnewfile = False
-            self.finode = snfs.tree.dir_or_inode(path)
+            self.data_only = 1043952    # bytes in 1 block of data
+            #self.isnewfile = False
             self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
                                   flag2mode(flags))
             self.fd = self.file.fileno()
-
-            download_from_vk(snfs.tree.dir_or_inode(path).blocks,
-                                 CACHE_DIR + path, inode.size)
+            
+            download_from_vk(snfs.tree.dir_or_inode(path).blocks, 
+                                CACHE_DIR + path, inode.size)
             return
 
         # in read() nothing to change as we've downloaded this file to the cache
@@ -248,36 +250,16 @@ class SNfs(Fuse):
         def write(self, buf, offset):
             self.file.seek(offset)
             self.file.write(buf)
-
-            if self.isnewfile:      # in case of new file we have to write all blocks
-                self.finode.size = os.path.getsize(CACHE_DIR + path)
-                self.update_pending = splitFile(self.file)        # get list of blocks for uploading
-            else:
-                # TODO: update/create links to blocks
-                self.data_only = 1043952    # bytes in 1 block of data
-                blockid = offset / self.data_only
-                block_list = splitFile(self.file)       # get list of blocks
-
-                for i in range(1,blockid-1)                         # fill with none list of mischanged blocks
-                            self.update_pending.append(None)
-
-                for i in self.mode:
-                    if i == os.O_APPEND:                # if append - then we add to the end and split again
-                        self.update_pending.extend(block_list[blockid::])
-                        return len(buf)
-                if self.finode.size < os.path.getsize(CACHE_DIR + path):    # if file size has been changed, than we have to rewrite all blocks starting from one that has changed
-                    self.finode.size = os.path.getsize(CACHE_DIR + path)    # update size in the inode
-                    self.update_pending.extend(block_list[blockid::])       # update all blocks
-                else:
-                    endblockid = (offset+len(buf))/self.data_only
-                    self.update_pending.extend(block_list[blockid:endblockid])  # update changed data
-
-                    for i in range(endblockid, len(block_list)):        # reach to the amount of blocks
-                        self.update_pending.append(None)
-
+            
+            snfs.tree.inode.size = os.path.getsize(CACHE_DIR + path)    # update size after every write operation
+            s_block = offset / self.data_only
+            end_block = (len(buf) + offset) / self.data_only 
+            self.log_changes.append((s_block, end_block))       # save to list all number of changed blocks
+            
             return len(buf)
 
         def release(self, flags):
+            #todo destroy object
             self.file.close()
 
         def _fflush(self):
@@ -294,6 +276,24 @@ class SNfs(Fuse):
         def flush(self):
             self._fflush()
             # cf. xmp_flush() in fusexmp_fh.c
+            block_list = splitFile(self.file)       # get list of blocks
+            
+            upd = len(self.log_changes)             # start uploading from the end 
+            #(@WARNING: do not know how to deal with intersections)
+            
+            for i in range (0,upd):                 # if no updates pending then say good bye
+                x,y = self.log_changes.pop()
+                self.update_pending = []            # list to store blocks that need update
+
+                self.update_pending.extend(block_list[x:y+1])     # add blocks that we need to update in cloud
+                
+                new_block_list = upload_to_vk(self.update_pending)      # long block updating process
+                c = snfs.tree.inode.blocks                              # reserved copy of previous blocks
+                snfs.tree.inode.blocks = []                             # null block links
+                snfs.tree.inode.blocks.extend(c[0:x])                   
+                snfs.tree.inode.blocks.extend(new_block_list[x:y+1])    # update with only uploaded blocks
+                snfs.tree.inode.blocks.extend(c[y+1:(snfs.tree.inode.size/self.data_only)])
+            
             os.close(os.dup(self.fd))
 
         def fgetattr(self):
@@ -301,9 +301,14 @@ class SNfs(Fuse):
 
         def ftruncate(self, len):
             self.file.truncate(len)
-            self.finode.size = os.path.getsize(CACHE_DIR + path)    #update size in the inode
-            block_list = splitFile(self.file)        # get list of blocks
-            self.update_pending
+            c = len(snfs.tree.inode.size)   #how much blocks did we have
+
+            bl_id = len/self.data_only + 1  # how much blocks we will have now
+            
+            for i in range(1, c - bl_id):           # delete block links
+                snfs.tree.inode.blocks.pop(bl_id)   # not tested. may be bl_id + 1
+            
+            snfs.tree.inode.size = os.path.getsize(CACHE_DIR + path)    #update size in the inode
 
         def lock(self, cmd, owner, **kw):
             # The code here is much rather just a demonstration of the locking
@@ -390,7 +395,7 @@ if __name__ == '__main__':
                                                         ## Then open it as a simple file
             #    download_from_vk(SNfs.tree.dir_or_inode(path).blocks,
             #                     CACHE_DIR + path, inode.size)
-
+            
             #else: # create new inode in directory
             #    self.isnewfile = True
 
