@@ -92,32 +92,23 @@ def upload_to_vk(array):
 
 def download_from_vk(tree=False, *args, **kwargs):
     # array = ['396547478_456239081', '396547478_456239082', '396547478_456239083', '396547478_456239084', '396547478_456239085', '396547478_456239086', '396547478_456239087', '396547478_456239088', '396547478_456239089', '396547478_456239090', '396547478_456239091']
-    if tree == False:
+    filenames = []
+    if not tree:
         array = kwargs['blocks']
         size = kwargs['size']
         fullpath = kwargs['fullpath']
         outputfile = fullpath.split("/")[-1]
-
-    filenames = []
-    if tree == True:
+    else:
         array = get_id_of_main_inode(hash=True)
-        # array = array[0].split("_")
-        # array = [str(array[0]) + "_" + str(array[1])]
-
-    print array
-    string = ''
     output = ''
     for i in array:
-        # string = string + "," + i
-        print i
         response = get_link_by_id(i)
 
-        for i in response:
-            print i
+        for j in response:
             donwloadedfile = urllib.URLopener()
-            filename = str(i[1]) + "_" + str(i[0]) + ".mp3"
+            filename = str(j[1]) + "_" + str(j[0]) + ".mp3"
             filenames.append(filename)
-            donwloadedfile.retrieve(i[2], filename)
+            donwloadedfile.retrieve(j[2], filename)
 
             f = open(filename, 'rb')
             data = f.read()
@@ -125,24 +116,24 @@ def download_from_vk(tree=False, *args, **kwargs):
             bytes = len(data)
             chunkSize = 960
             res = ''
-            for j in range(0, bytes, chunkSize):
-                res = res + data[j + 4:j + chunkSize]
+            for k in range(0, bytes, chunkSize):
+                res = res + data[k + 4:k + chunkSize]
             output = output + res
-            print j
 
 
     if tree == True:
         size = unpack(">i", output[:4])[0]
         print size
         #f.write(output[4:4 + size])
-        return output[4:4 + size]
-    else:
-        f = open(outputfile, 'wb')
-        f.write(output[:size])
-        f.close()
         for i in filenames:
             os.remove(i)
-        # print len(output)
+        return output[4:4 + size]
+    f = open(CACHE_DIR + fullpath, 'wb')
+    f.write(output[:size])
+    f.close()
+    for i in filenames:
+        os.remove(i)
+    # print len(output)
 
 
 def get_id_of_main_inode(hash=False):

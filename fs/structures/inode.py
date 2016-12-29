@@ -15,7 +15,7 @@ class Inode(object):
 
     def __init__(self, size, blocks, m_time=datetime.datetime.now(), c_time=datetime.datetime.now(),
                  a_time=datetime.datetime.now()):
-        self.id = uuid.uuid4()
+        self.id = int(uuid.uuid4().time_low)
         self.size = size
         self.blocks = blocks
         self.a_time = a_time
@@ -51,7 +51,8 @@ class Tree(object):
         path_components = ['/']
         if not path.startswith('/'):
             raise LookupError("Path must start with /")
-        path_components += path.strip('/').split('/')
+        if path != '/':
+            path_components += path.strip('/').split('/')
         return path_components
 
     def mkdir(self, path):
@@ -77,6 +78,7 @@ class Tree(object):
     def dir_or_inode(self, path):
         try:
             inode = self._find_path(self.inodes, self._path_dissect(path))
-        except KeyError or TypeError:
-            raise NoSuchPathExists(path)
+        except (KeyError, TypeError):
+            #raise NoSuchPathExists(path)
+            raise OSError(2, 'No such file or directory', path)
         return inode

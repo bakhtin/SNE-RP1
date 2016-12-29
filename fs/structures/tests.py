@@ -5,8 +5,8 @@ if __name__ == "__main__":
 
     # Inode test
     a = Inode(size=555211, blocks={1: range(11200, 11210), 2: range(11200, 11210), 3: range(11200, 11210)})
-    b = Inode(110001, range(11200, 11210))
-    c = Inode(4451, range(11200, 11210))
+    b = Inode(size=110001, blocks={1: range(11200, 11210), 2: range(11200, 11210), 3: range(11200, 11210)})
+    c = Inode(size=4451, blocks={1: range(11200, 11210), 2: range(11200, 11210), 3: range(11200, 11210)})
 
     # Tree test
     tree = Tree()
