@@ -1,4 +1,5 @@
 import os, sys
+from sets import Set
 from errno import *
 import stat
 import fcntl
@@ -217,7 +218,7 @@ class SNfs(Fuse):
                 all files are stored in cache (/var/cache/snfs/...)
                 after fsdestroy all cache should be removed (task pending)
             """
-            
+            self.snfs = snfs
             self.mode = mode        # remember the state 
             self.log_changes = []
             for i in mode:
@@ -225,7 +226,7 @@ class SNfs(Fuse):
                     #self.isnewfile = True
                     finode = Inode(0, range(1,2))       # 0-size and small range
                     path_comp = Tree._path_dissect(path)
-                    snfs._find_path(snfs.inodes, path_comp[:-1])[path_comp(path)[-1]] = finode #create inode for the file
+                    snfs._find_path(self.snfs.inodes, path_comp[:-1])[path_comp(path)[-1]] = finode #create inode for the file
                     self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
                                   flag2mode(flags))
                     self.fd = self.file.fileno()
@@ -234,6 +235,7 @@ class SNfs(Fuse):
                 # do not removed in case of wrong solution
             self.data_only = 1043952    # bytes in 1 block of data
             #self.isnewfile = False
+            
             self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
                                   flag2mode(flags))
             self.fd = self.file.fileno()
@@ -251,7 +253,7 @@ class SNfs(Fuse):
             self.file.seek(offset)
             self.file.write(buf)
             
-            snfs.tree.inode.size = os.path.getsize(CACHE_DIR + path)    # update size after every write operation
+            self.snfs.tree.inode.size = os.path.getsize(CACHE_DIR + path)    # update size after every write operation
             s_block = offset / self.data_only
             end_block = (len(buf) + offset) / self.data_only 
             self.log_changes.append((s_block, end_block))       # save to list all number of changed blocks
@@ -278,21 +280,31 @@ class SNfs(Fuse):
             # cf. xmp_flush() in fusexmp_fh.c
             block_list = splitFile(self.file)       # get list of blocks
             
-            upd = len(self.log_changes)             # start uploading from the end 
-            #(@WARNING: do not know how to deal with intersections)
             
-            for i in range (0,upd):                 # if no updates pending then say good bye
+            #(@WARNING: do not know how to deal with intersections)
+            x,y = self.log_changes.pop()
+            tmp = Set(range(x,y+1))
+            upd = len(self.log_changes)             # start uploading from the end 
+            block_order = []
+            self.update_pending = []                # list to store blocks that need update
+            for i in range (0, upd):
                 x,y = self.log_changes.pop()
-                self.update_pending = []            # list to store blocks that need update
+                t = Set(range(x,y+1))
+                tmp = tmp | (t.difference(tmp))     # expand the set with t - tmp
 
-                self.update_pending.extend(block_list[x:y+1])     # add blocks that we need to update in cloud
-                
-                new_block_list = upload_to_vk(self.update_pending)      # long block updating process
-                c = snfs.tree.inode.blocks                              # reserved copy of previous blocks
-                snfs.tree.inode.blocks = []                             # null block links
-                snfs.tree.inode.blocks.extend(c[0:x])                   
-                snfs.tree.inode.blocks.extend(new_block_list[x:y+1])    # update with only uploaded blocks
-                snfs.tree.inode.blocks.extend(c[y+1:(snfs.tree.inode.size/self.data_only)])
+            for i in tmp:
+                block_order.append(i)       # set --> list to perform order operation
+            block_order.sort()      # sort block order
+            for i in block_order:
+                if i < len(block_list):
+                    self.update_pending.append(block_list[i])   # fill updated blocks to the array for uploading
+            
+            new_block_id_list = upload_to_vk(self.update_pending) # upload updated blocks to the vk
+
+            for i in block_order:
+                if i < len(block_list):     # if once block had been updated before this part of file was cut -> do not upload
+                    self.snfs.tree.inode.blocks[i] = new_block_id_list[i]       # update links
+
             
             os.close(os.dup(self.fd))
 
@@ -308,7 +320,7 @@ class SNfs(Fuse):
             for i in range(1, c - bl_id):           # delete block links
                 snfs.tree.inode.blocks.pop(bl_id)   # not tested. may be bl_id + 1
             
-            snfs.tree.inode.size = os.path.getsize(CACHE_DIR + path)    #update size in the inode
+            self.snfs.tree.inode.size = os.path.getsize(CACHE_DIR + path)    #update size in the inode
 
         def lock(self, cmd, owner, **kw):
             # The code here is much rather just a demonstration of the locking
