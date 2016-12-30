@@ -4,6 +4,8 @@ import stat
 import sys
 from errno import *
 #from config import BLOCK_SIZE, CACHE_DIR
+from sets import Set
+
 BLOCK_SIZE = 1024 * 1024  # 1M
 CACHE_DIR = '/var/cache/snfs'
 
@@ -84,8 +86,8 @@ class Stat(fuse.Stat):
             self.st_mtime = self.st_atime
             self.st_ctime = self.st_atime
 
-class SNfs(Fuse):
 
+class SNfs(Fuse):
     def __init__(self, *args, **kw):
         Fuse.__init__(self, *args, **kw)
         self.root = '/'
@@ -231,13 +233,18 @@ class SNfs(Fuse):
 
     class SNFile(object):
 
-        def __init__(self, path, flags, *mode):
+        def __init__(self, path, flags, *mode, **kwargs):
             """
                 initialize file for a folder
                 if no file with such name exists, then we have to create one.
                 all files are stored in cache (/var/cache/snfs/...)
                 after fsdestroy all cache should be removed (task pending)
             """
+            try:
+                self.tree = kwargs['tree']
+            except KeyError:
+                pass
+            self.path = path
             self.mode = mode  # remember the state
             self.log_changes = []
             # TODO: we don't have access to snfs instance here.
@@ -247,7 +254,7 @@ class SNfs(Fuse):
                     # self.isnewfile = True
                     finode = Inode(0, range(1, 2))  # 0-size and small range
                     path_comp = Tree._path_dissect(path)
-                    Tree._find_path(self.snfs.inodes, path_comp[:-1])[
+                    Tree._find_path(self.tree.inodes, path_comp[:-1])[
                         path_comp(path)[-1]] = finode  # create inode for the file
                     self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
                                           flag2mode(flags))
@@ -273,8 +280,7 @@ class SNfs(Fuse):
         def write(self, buf, offset):
             self.file.seek(offset)
             self.file.write(buf)
-
-            self.snfs.tree.inode.size = os.path.getsize(CACHE_DIR + path)  # update size after every write operation
+            self.tree.inode.size = os.path.getsize(CACHE_DIR + self.path)  # update size after every write operation
             s_block = offset / self.data_only
             end_block = (len(buf) + offset) / self.data_only
             self.log_changes.append((s_block, end_block))  # save to list all number of changed blocks
@@ -324,7 +330,7 @@ class SNfs(Fuse):
             for i in block_order:
                 if i < len(
                         block_list):  # if once block had been updated before this part of file was cut -> do not upload
-                    self.snfs.tree.inode.blocks[i] = new_block_id_list[i]  # update links
+                    self.tree.inode.blocks[i] = new_block_id_list[i]  # update links
 
             os.close(os.dup(self.fd))
 
@@ -333,14 +339,14 @@ class SNfs(Fuse):
 
         def ftruncate(self, len):
             self.file.truncate(len)
-            c = len(snfs.tree.inode.size)  # how much blocks did we have
+            c = len(tree.inode.size)  # how much blocks did we have
 
             bl_id = len / self.data_only + 1  # how much blocks we will have now
 
             for i in range(1, c - bl_id):  # delete block links
                 snfs.tree.inode.blocks.pop(bl_id)  # not tested. may be bl_id + 1
 
-            self.snfs.tree.inode.size = os.path.getsize(CACHE_DIR + path)  # update size in the inode
+            self.snfs.tree.inode.size = os.path.getsize(CACHE_DIR + self.path)  # update size in the inode
 
         def lock(self, cmd, owner, **kw):
             # The code here is much rather just a demonstration of the locking
@@ -383,6 +389,7 @@ class SNfs(Fuse):
             fcntl.lockf(self.fd, op, kw['l_start'], kw['l_len'])
 
     def main(self, *a, **kw):
+        self.SNFile.tree = self.tree
         self.file_class = self.SNFile
         return Fuse.main(self, *a, **kw)
 
