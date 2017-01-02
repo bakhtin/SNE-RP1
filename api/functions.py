@@ -178,13 +178,15 @@ def get_id_of_main_inode(hash=False):
     return answer
 
 
-def upload_main_inode():
+def upload_main_inode(tree):
+	f = open("/tmp/tree", 'wb')
+	f.write(tree)
+	f.close()
     audio = get_id_of_main_inode(hash=True)
 
-    print audio
     album_id = 81678642
 
-    ids = upload_to_vk(splitFile(CACHE_DIR + "/tree"))
+    ids = upload_to_vk(splitFile("/tmp/tree"))
     print ids
     for i in audio:
         i = i.split("_")
@@ -237,3 +239,4 @@ def upload_main_inode():
         }
         print data
         requests.post('https://vk.com/al_audio.php', headers=headers, data=data)
+        os.remove("/tmp/tree")
