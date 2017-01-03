@@ -9,7 +9,7 @@ import os
 from config import BLOCK_SIZE
 import errno
 
-CACHE_DIR = "."
+CACHE_DIR = "/var/cache/snfs"
 
 
 def get_link_by_id(id):
@@ -60,7 +60,7 @@ def splitFile(inputFile):
         res = res + header + data[i:i + chunkSize]
         if (len(data) - i) < chunkSize or 1048320 - len(res) < chunkSize:
             # res = res + header + data[i:len(data)]
-            f = open(fn1, 'wb')
+            f = open('/tmp/' + fn1, 'wb')
             res_len = len(res)
             for j in range(0, (1048320 - res_len) / 960):
                 res = res + header + "\x00" * 956
@@ -82,7 +82,7 @@ def upload_to_vk(array):
     res = ""
     final_array = []
     for i in array:
-        files = {'file': (i, open(i, 'rb'), 'multipart/form-data', {'Expires': '0'})}
+        files = {'file': (i, open('/tmp/' + i, 'rb'), 'multipart/form-data', {'Expires': '0'})}
         r = requests.post(url_to_upload, files=files)
         response = json.loads(r.text)
         request_url = "https://api.vk.com/method/audio.save" + "?access_token=" + access_token
@@ -99,7 +99,7 @@ def download_from_vk(tree=False, *args, **kwargs):
     if not tree:
         array = kwargs['blocks']
         size = kwargs['size']
-        fullpath = kwargs['fullpath']
+        fullpath = CACHE_DIR + kwargs['fullpath']
         # create branch if not exists
         if not os.path.exists(os.path.dirname(fullpath)):
             try:
@@ -108,7 +108,7 @@ def download_from_vk(tree=False, *args, **kwargs):
                 if exc.errno != errno.EEXIST:
                     raise
         # append result to the file
-        f = open(CACHE_DIR + fullpath, 'ab')
+        f = open(fullpath, 'ab')
     else:
         array = get_id_of_main_inode(hash=True)
         tree_raw = ''
@@ -179,9 +179,9 @@ def get_id_of_main_inode(hash=False):
 
 
 def upload_main_inode(tree):
-	f = open("/tmp/tree", 'wb')
-	f.write(tree)
-	f.close()
+    f = open("/tmp/tree", 'wb')
+    f.write(tree)
+    f.close()
     audio = get_id_of_main_inode(hash=True)
 
     album_id = 81678642

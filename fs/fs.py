@@ -16,7 +16,7 @@ except ImportError:
 import fuse
 from fuse import Fuse
 from structures.inode import Inode, Tree
-from api.functions import splitFile, upload_to_vk, download_from_vk, get_id_of_main_inode
+from api.functions import splitFile, upload_to_vk, download_from_vk, upload_main_inode
 import time
 from structures.exceptions import *
 
@@ -60,19 +60,18 @@ def flag2mode(flags):
 TREE = Tree()
 
 class Stat(fuse.Stat):
-    # TODO: Implement handling of times and owners
+    # TODO: Implement handling of owners
     def __init__(self, inode=None):
         if inode:
             self.st_mode = stat.S_IFREG | 0644
             self.st_ino = inode.id
-            #self.st_ino = 444552
             self.st_dev = 0
             self.st_nlink = 1
             self.st_uid = os.getuid()
             self.st_gid = os.getgid()
             self.st_size = inode.size
             self.st_atime = int(time.time())
-            self.st_mtime = time.mktime(inode.m_time.timetuple())
+            self.st_mtime = inode.m_time
             self.st_ctime = self.st_mtime
         else:
             self.st_mode = stat.S_IFDIR | 0755
@@ -96,9 +95,9 @@ class SNfs(Fuse):
         except OSError:                  # path already exists
             pass
 
-        #tree_str = download_from_vk(tree=True)
-        #self.tree = Tree.unmarshal(tree_str)
-        self.tree = tree
+        tree_str = download_from_vk(tree=True)
+        self.tree = Tree.unmarshal(tree_str)
+        #self.tree = tree
         print tree
 
     def getattr(self, path):
@@ -227,9 +226,8 @@ class SNfs(Fuse):
     def fsinit(self):
         os.chdir(self.root)
 
-    # TODO: Upload tree on unmount
     def fsdestroy(self):
-        pass
+        upload_main_inode(self.tree.marshal())
 
     class SNFile(object):
 
@@ -247,30 +245,40 @@ class SNfs(Fuse):
             self.path = path
             self.mode = mode  # remember the state
             self.log_changes = []
-            # TODO: we don't have access to snfs instance here.
-            # Thus, process files as local ones (with os.open, etc)
-            for i in mode:
-                if i == os.O_CREAT:  # create file immediately
-                    # self.isnewfile = True
-                    finode = Inode(0, range(1, 2))  # 0-size and small range
-                    path_comp = Tree._path_dissect(path)
-                    Tree._find_path(self.tree.inodes, path_comp[:-1])[
-                        path_comp(path)[-1]] = finode  # create inode for the file
-                    self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
-                                          flag2mode(flags))
-                    self.fd = self.file.fileno()
-                    return
-                    # other states do not mind right now
-                    # do not removed in case of wrong solution
-            self.data_only = 1043952  # bytes in 1 block of data
-            # self.isnewfile = False
+
+            path_components = Tree._path_dissect(self.path)
+            if not os.path.exists(CACHE_DIR + self.path):
+                try:
+                    finode = Tree._find_path(self.tree.inodes, path_components)
+                    download_from_vk(blocks=finode.blocks[1], size=finode.size, fullpath=self.path)
+                    self.finode = finode
+                except (TypeError, KeyError):
+                    if flag2mode(flags) in ['a', 'w+']:
+                        finode = Inode(size=0, blocks={1: [], 2: [], 3: []})
+                        Tree._find_path(self.tree.inodes, path_components[:-1])[path_components[-1]] = finode
+                        self.finode = finode
+                    else:
+                        raise OSError(2, 'No such file or directory', path)
+
+            # for i in mode:
+            #     if i == os.O_CREAT:  # create file immediately
+            #         # self.isnewfile = True
+            #         finode = Inode(0, range(1, 2))  # 0-size and small range
+            #         path_comp = Tree._path_dissect(path)
+            #         Tree._find_path(self.tree.inodes, path_comp[:-1])[
+            #             path_comp(path)[-1]] = finode  # create inode for the file
+            #         self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
+            #                               flag2mode(flags))
+            #         self.fd = self.file.fileno()
+            #         return
+            #         # other states do not mind right now
+            #         # do not removed in case of wrong solution
+            # self.data_only = BLOCK_SIZE  # bytes in 1 block of data
+            # # self.isnewfile = False
 
             self.file = os.fdopen(os.open(CACHE_DIR + path, flags, *mode),
                                   flag2mode(flags))
             self.fd = self.file.fileno()
-
-            #download_from_vk(snfs.tree.dir_or_inode(path).blocks,
-            #                 CACHE_DIR + path, inode.size)
 
         # in read() nothing to change as we've downloaded this file to the cache
         def read(self, length, offset):
@@ -280,9 +288,9 @@ class SNfs(Fuse):
         def write(self, buf, offset):
             self.file.seek(offset)
             self.file.write(buf)
-            self.tree.inode.size = os.path.getsize(CACHE_DIR + self.path)  # update size after every write operation
-            s_block = offset / self.data_only
-            end_block = (len(buf) + offset) / self.data_only
+            self.finode.size += len(buf)  # update size after every write operation
+            s_block = offset / BLOCK_SIZE
+            end_block = (len(buf) + offset) / BLOCK_SIZE
             self.log_changes.append((s_block, end_block))  # save to list all number of changed blocks
 
             return len(buf)
@@ -305,32 +313,38 @@ class SNfs(Fuse):
         def flush(self):
             self._fflush()
             # cf. xmp_flush() in fusexmp_fh.c
-            block_list = splitFile(self.file)  # get list of blocks
+            block_list = splitFile(CACHE_DIR + self.path)  # get list of blocks
 
-            # (@WARNING: do not know how to deal with intersections)
-            x, y = self.log_changes.pop()
-            tmp = Set(range(x, y + 1))
-            upd = len(self.log_changes)  # start uploading from the end
-            block_order = []
-            self.update_pending = []  # list to store blocks that need update
-            for i in range(0, upd):
+            # the file already exists
+            if len(self.log_changes) > 0:
+                # (@WARNING: do not know how to deal with intersections)
                 x, y = self.log_changes.pop()
-                t = Set(range(x, y + 1))
-                tmp = tmp | (t.difference(tmp))  # expand the set with t - tmp
+                tmp = Set(range(x, y + 1))
+                upd = len(self.log_changes)  # start uploading from the end
+                block_order = []
+                self.update_pending = []  # list to store blocks that need update
+                for i in range(0, upd):
+                    x, y = self.log_changes.pop()
+                    t = Set(range(x, y + 1))
+                    tmp = tmp | (t.difference(tmp))  # expand the set with t - tmp
 
-            for i in tmp:
-                block_order.append(i)  # set --> list to perform order operation
-            block_order.sort()  # sort block order
-            for i in block_order:
-                if i < len(block_list):
-                    self.update_pending.append(block_list[i])  # fill updated blocks to the array for uploading
+                for i in tmp:
+                    block_order.append(i)  # set --> list to perform order operation
+                block_order.sort()  # sort block order
+                for i in block_order:
+                    if i < len(block_list):
+                        self.update_pending.append(block_list[i])  # fill updated blocks to the array for uploading
 
-            new_block_id_list = upload_to_vk(self.update_pending)  # upload updated blocks to the vk
+                new_block_id_list = upload_to_vk(self.update_pending)  # upload updated blocks to the vk
 
-            for i in block_order:
-                if i < len(
-                        block_list):  # if once block had been updated before this part of file was cut -> do not upload
-                    self.tree.inode.blocks[i] = new_block_id_list[i]  # update links
+                for i in block_order:
+                    if i < len(block_list):  # if once block had been updated before this part of file was cut -> do not upload
+                        self.finode.blocks[1][i] = new_block_id_list[i]
+
+            # the file has just been created with zero bytes length
+            else:
+                new_block_id_list = upload_to_vk(block_list)
+                self.finode.blocks[1] = new_block_id_list
 
             os.close(os.dup(self.fd))
 
