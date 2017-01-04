@@ -1,10 +1,9 @@
-import fcntl
-import os
-import stat
-import sys
+import fcntl, sys, stat, os, shutil
 from errno import *
 #from config import BLOCK_SIZE, CACHE_DIR
 from sets import Set
+
+import errno
 
 BLOCK_SIZE = 1024 * 1024  # 1M
 CACHE_DIR = '/var/cache/snfs'
@@ -56,9 +55,6 @@ def flag2mode(flags):
 
     return m
 
-# stub
-TREE = Tree()
-
 class Stat(fuse.Stat):
     # TODO: Implement handling of owners
     def __init__(self, inode=None):
@@ -98,7 +94,6 @@ class SNfs(Fuse):
         tree_str = download_from_vk(tree=True)
         self.tree = Tree.unmarshal(tree_str)
         #self.tree = tree
-        print tree
 
     def getattr(self, path):
         d_or_f = self.tree.dir_or_inode(path)
@@ -135,6 +130,7 @@ class SNfs(Fuse):
         pass
 
     def rename(self, path, path1):
+        # TODO: reflect rename in CACHE_DIR
         path_components = Tree._path_dissect(path)
         new_name = path1.strip('/').split('/')[-1]
         sub = self.tree.inodes
@@ -176,6 +172,13 @@ class SNfs(Fuse):
 
     def mkdir(self, path, mode):
         self.tree.mkdir(path)
+        # create branch in CACHE_DIR if not exists
+        if not os.path.exists(CACHE_DIR + path):
+            try:
+                os.makedirs(CACHE_DIR + path)
+            except OSError as exc:
+                if exc.errno != errno.EEXIST:
+                    raise
 
     def utime(self, path, times):
         d_or_f = self.tree.dir_or_inode(path)
@@ -227,6 +230,17 @@ class SNfs(Fuse):
         os.chdir(self.root)
 
     def fsdestroy(self):
+        # clear CACHE_DIR
+        folder = CACHE_DIR
+        for the_file in os.listdir(folder):
+            file_path = os.path.join(folder, the_file)
+            try:
+                if os.path.isfile(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path): shutil.rmtree(file_path)
+            except Exception as e:
+                print(e)
+        # upload the tree
         upload_main_inode(self.tree.marshal())
 
     class SNFile(object):
@@ -250,7 +264,10 @@ class SNfs(Fuse):
             if not os.path.exists(CACHE_DIR + self.path):
                 try:
                     finode = Tree._find_path(self.tree.inodes, path_components)
-                    download_from_vk(blocks=finode.blocks[1], size=finode.size, fullpath=self.path)
+                    if finode.size > 0:
+                        download_from_vk(blocks=finode.blocks[1], size=finode.size, fullpath=self.path)
+                    else:
+                        open(CACHE_DIR + self.path, 'a').close()
                     self.finode = finode
                 except (TypeError, KeyError):
                     if flag2mode(flags) in ['a', 'w+']:
@@ -259,6 +276,8 @@ class SNfs(Fuse):
                         self.finode = finode
                     else:
                         raise OSError(2, 'No such file or directory', path)
+            else:
+                self.finode = Tree._find_path(self.tree.inodes, path_components)
 
             # for i in mode:
             #     if i == os.O_CREAT:  # create file immediately
@@ -288,8 +307,7 @@ class SNfs(Fuse):
         def write(self, buf, offset):
             self.file.seek(offset)
             self.file.write(buf)
-            self.finode.size = len(buf)  # update size after every write operation
-            #self.finode.size += len(buf)  # update size after every write operation
+            #self.finode.size = len(buf)  # update size after every write operation
             s_block = offset / BLOCK_SIZE
             end_block = (len(buf) + offset) / BLOCK_SIZE
             self.log_changes.append((s_block, end_block))  # save to list all number of changed blocks
@@ -313,7 +331,7 @@ class SNfs(Fuse):
 
             block_list = splitFile(CACHE_DIR + self.path)  # get list of blocks
             pos = self.file.tell()
-			self.file.seek(0,2)
+            self.file.seek(0,2)
             self.finode.size = self.file.tell()
             self.file.seek(pos,0)	# return back to the current pos
 
@@ -359,7 +377,7 @@ class SNfs(Fuse):
 
             #change inode size
             pos = self.file.tell()
-			self.file.seek(0,2)
+            self.file.seek(0,2)
             self.finode.size = self.file.tell()
             self.file.seek(pos,0)	# return back to the current pos
             path_components = Tree._path_dissect(self.path)

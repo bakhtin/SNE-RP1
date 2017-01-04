@@ -10,7 +10,7 @@ if __name__ == "__main__":
 
     # Tree test
     tree = Tree()
-    #upload_main_inode(tree.marshal())
+    upload_main_inode(tree.marshal())
     # tree.mkdir('/home')
     # tree.mkdir('/home/horn')
     # tree.mkdir('/home/test')
@@ -34,6 +34,6 @@ if __name__ == "__main__":
     # print tree.unmarshal(tree_str)
 
     #upload_main_inode(tree.marshal())
-    tree_str = download_from_vk(tree=True)
+    #tree_str = download_from_vk(tree=True)
 
-    print Tree.unmarshal(tree_str)
+    #print Tree.unmarshal(tree_str)
