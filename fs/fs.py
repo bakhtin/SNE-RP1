@@ -288,7 +288,8 @@ class SNfs(Fuse):
         def write(self, buf, offset):
             self.file.seek(offset)
             self.file.write(buf)
-            self.finode.size += len(buf)  # update size after every write operation
+            self.finode.size = len(buf)  # update size after every write operation
+            #self.finode.size += len(buf)  # update size after every write operation
             s_block = offset / BLOCK_SIZE
             end_block = (len(buf) + offset) / BLOCK_SIZE
             self.log_changes.append((s_block, end_block))  # save to list all number of changed blocks
@@ -310,10 +311,11 @@ class SNfs(Fuse):
             else:
                 os.fsync(self.fd)
 
-        def flush(self):
-            self._fflush()
-            # cf. xmp_flush() in fusexmp_fh.c
             block_list = splitFile(CACHE_DIR + self.path)  # get list of blocks
+            pos = self.file.tell()
+			self.file.seek(0,2)
+            self.finode.size = self.file.tell()
+            self.file.seek(pos,0)	# return back to the current pos
 
             # the file already exists
             if len(self.log_changes) > 0:
@@ -345,6 +347,53 @@ class SNfs(Fuse):
             else:
                 new_block_id_list = upload_to_vk(block_list)
                 self.finode.blocks[1] = new_block_id_list
+
+            path_components = Tree._path_dissect(self.path)
+            Tree._find_path(self.tree.inodes, path_components[:-1])[path_components[-1]] = self.finode
+
+
+        def flush(self):
+            self._fflush()
+            # cf. xmp_flush() in fusexmp_fh.c
+            #block_list = splitFile(CACHE_DIR + self.path)  # get list of blocks
+
+            #change inode size
+            pos = self.file.tell()
+			self.file.seek(0,2)
+            self.finode.size = self.file.tell()
+            self.file.seek(pos,0)	# return back to the current pos
+            path_components = Tree._path_dissect(self.path)
+            Tree._find_path(self.tree.inodes, path_components[:-1])[path_components[-1]] = self.finode
+            # # the file already exists
+            # if len(self.log_changes) > 0:
+            #     # (@WARNING: do not know how to deal with intersections)
+            #     x, y = self.log_changes.pop()
+            #     tmp = Set(range(x, y + 1))
+            #     upd = len(self.log_changes)  # start uploading from the end
+            #     block_order = []
+            #     self.update_pending = []  # list to store blocks that need update
+            #     for i in range(0, upd):
+            #         x, y = self.log_changes.pop()
+            #         t = Set(range(x, y + 1))
+            #         tmp = tmp | (t.difference(tmp))  # expand the set with t - tmp
+
+            #     for i in tmp:
+            #         block_order.append(i)  # set --> list to perform order operation
+            #     block_order.sort()  # sort block order
+            #     for i in block_order:
+            #         if i < len(block_list):
+            #             self.update_pending.append(block_list[i])  # fill updated blocks to the array for uploading
+
+            #     new_block_id_list = upload_to_vk(self.update_pending)  # upload updated blocks to the vk
+
+            #     for i in block_order:
+            #         if i < len(block_list):  # if once block had been updated before this part of file was cut -> do not upload
+            #             self.finode.blocks[1][i] = new_block_id_list[i]
+
+            # # the file has just been created with zero bytes length
+            # else:
+            #     new_block_id_list = upload_to_vk(block_list)
+            #     self.finode.blocks[1] = new_block_id_list
 
             os.close(os.dup(self.fd))
 
