@@ -4,3 +4,6 @@ access_token = "4f050c2ec93a5ed968d23d3358d220632ecdbfe9c34beb95971bb05acdd3e75d
 
 #t = download_from_vk(tree=True)
 #print Tree.unmarshal(t)
+
+files = splitFile('/tmp/splitme')
+print upload_to_vk(files)

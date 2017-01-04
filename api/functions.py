@@ -2,11 +2,12 @@ import requests
 import json
 import re
 import urllib
+from multiprocessing.pool import ThreadPool
 from struct import *
 import time
 import os
 
-from config import BLOCK_SIZE
+from config import BLOCK_SIZE, FILE_UPLOAD_THREADS_NUM
 import errno
 
 CACHE_DIR = "/var/cache/snfs"
@@ -75,23 +76,29 @@ def splitFile(inputFile):
 access_token = "4f050c2ec93a5ed968d23d3358d220632ecdbfe9c34beb95971bb05acdd3e75dd8ce3a181bdf181b9a665"
 
 
-def upload_to_vk(array):
+# 4 is OK. Occasional errors if use more
+def upload_to_vk(array, threads_num=FILE_UPLOAD_THREADS_NUM):
+    pool = ThreadPool(processes=threads_num)
+    res = pool.map(upload_to_vk_single, array)
+    return res
+
+
+def upload_to_vk_single(fname):
     request_url = "https://api.vk.com/method/audio.getUploadServer" + "?access_token=" + access_token
     r = requests.get(request_url)
     url_to_upload = json.loads(r.text)['response']['upload_url']
-    res = ""
-    final_array = []
-    for i in array:
-        files = {'file': (i, open('/tmp/' + i, 'rb'), 'multipart/form-data', {'Expires': '0'})}
-        r = requests.post(url_to_upload, files=files)
-        response = json.loads(r.text)
-        request_url = "https://api.vk.com/method/audio.save" + "?access_token=" + access_token
-        payload = {'server': response['server'], 'audio': response['audio'], 'hash': response['hash'],
-                   'artist': "SSNSNERPONE", 'title': time.strftime('%Y%m%d-%H%M%S')}
-        r = requests.get(request_url, params=payload)
-        response = json.loads(r.text)
-        final_array.append(str(response['response']['owner_id']) + "_" + str(response['response']['aid']))
-    return final_array
+    files = {'file': (fname, open('/tmp/' + fname, 'rb'), 'multipart/form-data', {'Expires': '0'})}
+    r = requests.post(url_to_upload, files=files)
+    response = json.loads(r.text)
+    request_url = "https://api.vk.com/method/audio.save" + "?access_token=" + access_token
+    payload = {'server': response['server'], 'audio': response['audio'], 'hash': response['hash'],
+               'artist': "SSNSNERPONE", 'title': time.strftime('%Y%m%d-%H%M%S')}
+    r = requests.get(request_url, params=payload)
+    response = json.loads(r.text)
+    print response
+    #return fname, int(fname.strip('chunk').rstrip('.mp3')), str(response['response']['owner_id']) + "_" + str(response['response']['aid'])
+    # no need to restore order the files were uploaded in?
+    return str(response['response']['owner_id']) + "_" + str(response['response']['aid'])
 
 
 def download_from_vk(tree=False, *args, **kwargs):
