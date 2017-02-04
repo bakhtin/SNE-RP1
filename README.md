@@ -1,2 +1,4 @@
 # SNE-RP1
-Results of the work on Research Project 1. SNE Program 2016, Innopolis
+Research Project 1. SNE Program 2016, Innopolis
+
+FUSE filesystem based on Vkontakte musical tracks
